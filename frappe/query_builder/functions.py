@@ -87,6 +87,18 @@ class Locate(Function):
 		super().__init__("LOCATE", needle, haystack, **kwargs)
 
 
+class MariaDBUnicodeWeight(Function):
+	"""MariaDB collation weight for canonical Unicode-aware text comparisons."""
+
+	def __init__(self, value, **kwargs):
+		super().__init__("WEIGHT_STRING", value, **kwargs)
+
+	def get_function_sql(self, **kwargs):
+		sql = super().get_function_sql(**kwargs)
+		value_sql = sql.removeprefix("WEIGHT_STRING(").removesuffix(")")
+		return f"WEIGHT_STRING(CONVERT({value_sql} USING utf8mb4) COLLATE utf8mb4_unicode_ci)"
+
+
 class Strpos(Function):
 	def __init__(self, needle, haystack, **kwargs):
 		super().__init__("STRPOS", haystack, needle, **kwargs)

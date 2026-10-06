@@ -245,10 +245,16 @@ def search_widget(
 		if meta.search_fields:
 			search_fields.extend(meta.get_search_fields())
 
+		use_unicode_contains = frappe.db.db_type == "mariadb" and not any(
+			char in txt for char in ("%", "_", "\\")
+		)
+		search_operator = "unicode contains" if use_unicode_contains else "like"
+		search_value = txt if use_unicode_contains else f"%{txt}%"
+
 		for f in search_fields:
 			fmeta = meta.get_field(f.strip())
 			if not meta.translated_doctype and (f == "name" or (fmeta and fmeta.fieldtype in field_types)):
-				or_filters.append([doctype, f.strip(), "like", f"%{txt}%"])
+				or_filters.append([doctype, f.strip(), search_operator, search_value])
 
 	if not include_disabled:
 		if meta.get("fields", {"fieldname": "enabled", "fieldtype": "Check"}):

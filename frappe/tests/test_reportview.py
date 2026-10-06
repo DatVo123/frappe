@@ -2,6 +2,7 @@
 # License: MIT. See LICENSE
 
 import json
+import unicodedata
 
 import frappe
 from frappe.desk.reportview import (
@@ -11,9 +12,13 @@ from frappe.desk.reportview import (
 	get,
 	get_field_info,
 	get_filter_dashboard_data,
+	get_form_params,
+	get_list,
 	get_stats,
 )
+from frappe.query_builder.utils import db_type_is
 from frappe.tests import IntegrationTestCase
+from frappe.tests.test_query_builder import run_only_if
 
 
 class TestReportview(IntegrationTestCase):
@@ -21,6 +26,29 @@ class TestReportview(IntegrationTestCase):
 		super().setUp()
 		previous_form_dict = frappe.local.form_dict
 		self.addCleanup(setattr, frappe.local, "form_dict", previous_form_dict)
+
+	@run_only_if(db_type_is.MARIADB)
+	def test_list_filter_matches_canonical_unicode(self):
+		decomposed = "Tr\u00e2\u0300n Qu\u00f4\u0301c Huy"
+		nfc = unicodedata.normalize("NFC", decomposed)
+		self.assertNotEqual(decomposed, nfc)
+
+		note = frappe.get_doc(
+			{"doctype": "Note", "title": decomposed, "content": "ReportView Unicode regression"}
+		).insert()
+		self.addCleanup(lambda: frappe.delete_doc("Note", note.name, force=True))
+
+		frappe.local.form_dict = frappe._dict(
+			doctype="Note",
+			fields=["name", "title"],
+			filters=[["Note", "title", "like", f"%{nfc}%"]],
+			page_length=20,
+		)
+
+		args = get_form_params()
+		self.assertEqual(args.filters[0][2], "unicode contains")
+		self.assertEqual(args.filters[0][3], nfc)
+		self.assertIn(note.name, [row["name"] for row in get_list()])
 
 	def test_get_field_info_translates_field_labels(self):
 		doctype = "Translation"

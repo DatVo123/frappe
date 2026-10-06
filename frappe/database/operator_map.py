@@ -8,6 +8,7 @@ import frappe
 from frappe.database.utils import NestedSetHierarchy
 from frappe.model.db_query import get_timespan_date_range
 from frappe.query_builder import Field
+from frappe.query_builder.functions import Locate, MariaDBUnicodeWeight
 from frappe.utils import cstr
 
 
@@ -22,6 +23,13 @@ def like(key: Field, value: str):
 	        frappe.qb: `frappe.qb` object with `LIKE`
 	"""
 	return key.like(value)
+
+
+def unicode_contains(key: Field, value: str):
+	"""Canonical Unicode-aware contains search on MariaDB."""
+	if frappe.db.db_type != "mariadb":
+		return key.like(f"%{value}%")
+	return Locate(MariaDBUnicodeWeight(value), MariaDBUnicodeWeight(key)) > 0
 
 
 def ilike(key: Field, value: str):
@@ -152,6 +160,7 @@ OPERATOR_MAP: dict[str, Callable] = {
 	"in": func_in,
 	"not in": func_not_in,
 	"like": like,
+	"unicode contains": unicode_contains,
 	"ilike": ilike,
 	"not like": not_like,
 	"regex": func_regex,

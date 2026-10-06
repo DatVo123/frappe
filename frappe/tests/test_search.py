@@ -2,6 +2,7 @@
 # License: MIT. See LICENSE
 
 import re
+import unicodedata
 from contextlib import contextmanager
 from functools import partial
 from typing import Any
@@ -18,7 +19,9 @@ from frappe.desk.search import (
 	search_widget,
 )
 from frappe.permissions import add_user_permission
+from frappe.query_builder.utils import db_type_is
 from frappe.tests import IntegrationTestCase
+from frappe.tests.test_query_builder import run_only_if
 from frappe.tests.utils import whitelist_for_tests
 
 
@@ -27,6 +30,21 @@ class TestSearch(IntegrationTestCase):
 		if self._testMethodName == "test_link_field_order":
 			setup_test_link_field_order(self)
 			self.addCleanup(teardown_test_link_field_order, self)
+
+	@run_only_if(db_type_is.MARIADB)
+	def test_link_search_matches_canonical_unicode(self):
+		decomposed = "Tr\u00e2\u0300n Qu\u00f4\u0301c Huy"
+		nfc = unicodedata.normalize("NFC", decomposed)
+		self.assertNotEqual(decomposed, nfc)
+
+		note = frappe.get_doc(
+			{"doctype": "Note", "title": decomposed, "content": "Unicode canonical search regression"}
+		).insert()
+		self.addCleanup(lambda: frappe.delete_doc("Note", note.name, force=True))
+
+		for needle in (decomposed, nfc, "Trần", "Quốc", "tran quoc huy"):
+			results = search_widget("Note", needle, searchfield="title", page_length=20)
+			self.assertIn(note.name, [row[0] for row in results])
 
 	def test_search_field_sanitizer(self):
 		results = search_link("DocType", "User", query=None, filters=None, page_length=20, searchfield="name")

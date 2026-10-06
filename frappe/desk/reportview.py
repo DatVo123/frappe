@@ -23,6 +23,23 @@ from frappe.utils import add_user_info, cint, format_duration
 from frappe.utils.data import sbool
 
 DISALLOWED_PARAMS = ("cmd", "data", "ignore_permissions", "view", "user", "csrf_token", "join")
+
+REPORTVIEW_UNICODE_SEARCH_FIELD_TYPES = {
+	"Autocomplete",
+	"Code",
+	"Data",
+	"HTML Editor",
+	"JSON",
+	"Link",
+	"Long Text",
+	"Markdown Editor",
+	"Phone",
+	"Read Only",
+	"Select",
+	"Small Text",
+	"Text",
+	"Text Editor",
+}
 SUPPORTED_AGGREGATE_FUNCTIONS = ("count", "sum", "avg")
 DEFAULT_AGGREGATE_FIELDNAME = "_aggregate_column"
 _FIELDNAME_RE = re.compile(r"^[a-zA-Z0-9_]+$")
@@ -144,6 +161,7 @@ def validate_args(data):
 	if data.or_filters:
 		validate_filters(data, data.or_filters)
 
+	normalize_reportview_unicode_filters(data)
 	data.strict = None
 
 	return data
@@ -210,6 +228,52 @@ def validate_filters(data, filters):
 			meta, df = get_meta_and_docfield(fieldname, data)
 			if not df:
 				raise_invalid_field(fieldname)
+
+
+def normalize_reportview_unicode_filters(data):
+	"""Use canonical Unicode-aware matching for simple text contains filters on MariaDB."""
+	if frappe.db.db_type != "mariadb" or is_virtual_doctype(data.doctype):
+		return
+
+	for key in ("filters", "or_filters"):
+		filters = data.get(key)
+		if not isinstance(filters, list):
+			continue
+
+		for index, condition in enumerate(filters):
+			if not isinstance(condition, list) or len(condition) not in (3, 4):
+				continue
+
+			operator_index = 1 if len(condition) == 3 else 2
+			value_index = 2 if len(condition) == 3 else 3
+			field_index = 0 if len(condition) == 3 else 1
+
+			if str(condition[operator_index]).lower() != "like":
+				continue
+
+			value = condition[value_index]
+			if not isinstance(value, str) or len(value) < 3 or not (value.startswith("%") and value.endswith("%")):
+				continue
+
+			needle = value[1:-1]
+			if not needle or any(char in needle for char in ("%", "_", "\\")):
+				continue
+
+			fieldname = condition[field_index].strip("`")
+			if len(condition) == 4:
+				parenttype = condition[0]
+			else:
+				parenttype, fieldname = get_parenttype_and_fieldname(fieldname, data)
+
+			if fieldname != "name":
+				df = frappe.get_meta(parenttype).get_field(fieldname)
+				if not df or df.fieldtype not in REPORTVIEW_UNICODE_SEARCH_FIELD_TYPES:
+					continue
+
+			normalized = list(condition)
+			normalized[operator_index] = "unicode contains"
+			normalized[value_index] = needle
+			filters[index] = normalized
 
 
 def setup_group_by(data):
